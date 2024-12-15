@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 
-	"grpc-chat-service/chat" // Ganti dengan path yang sesuai
+	"grpc-chat-service/chat"
 
 	"google.golang.org/grpc"
 )
@@ -44,13 +45,17 @@ func main() {
 	go func() {
 		defer wg.Done()
 		for {
+			fmt.Print("Enter recipient (leave empty for broadcast; add '@' for group name, e.g., '@group1'): ")
+			target, _ := reader.ReadString('\n')
+			target = strings.TrimSpace(target)
+
 			fmt.Print("Enter message: ")
 			text, _ := reader.ReadString('\n')
 			text = text[:len(text)-1] // Menghapus karakter newline
 
 			err := stream.Send(&chat.ChatMessage{
 				Sender:    name,
-				Recipient: "all", // Bisa diatur jika hanya untuk user tertentu
+				Recipient: target,
 				Text:      text,
 			})
 			if err != nil {

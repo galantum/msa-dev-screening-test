@@ -3,10 +3,11 @@ package main
 import (
 	"io"
 	"log"
+	"net"
+	"strings"
 	"sync"
 
 	"grpc-chat-service/chat"
-	"net"
 
 	"google.golang.org/grpc"
 )
@@ -15,11 +16,13 @@ type chatServer struct {
 	chat.UnimplementedChatServiceServer
 	mu      sync.Mutex
 	clients map[string]chat.ChatService_JoinChatServer // Menyimpan stream client
+	groups  map[string][]string
 }
 
 func newChatServer() *chatServer {
 	return &chatServer{
 		clients: make(map[string]chat.ChatService_JoinChatServer),
+		groups:  make(map[string][]string),
 	}
 }
 
@@ -54,21 +57,84 @@ func (s *chatServer) JoinChat(stream chat.ChatService_JoinChatServer) error {
 
 		log.Printf("Message from %s: %s", msg.Sender, msg.Text)
 
-		// Kirim pesan ke semua client kecuali pengirim
-		s.mu.Lock()
-		for name, clientStream := range s.clients {
-			if name != msg.Sender {
+		// Jika recipient empty, broadcast ke all
+		if msg.Recipient == "" {
+			// Jika recipient kosong, lakukan broadcast ke semua klien
+			s.broadcastToAll(msg)
+		} else if isGroup(msg.Recipient) { // Jika recipient adalah nama grup (misalnya "group_name"), broadcast ke grup
+			s.mu.Lock()
+			// Tambahkan pengirim ke grup jika belum ada
+			if !contains(s.groups[msg.Recipient], msg.Sender) {
+				s.groups[msg.Recipient] = append(s.groups[msg.Recipient], msg.Sender)
+			}
+			s.mu.Unlock()
+			s.broadcastToGroup(msg.Recipient, msg)
+		} else {
+			// Pesan pribadi ke client tertentu
+			s.mu.Lock()
+			recipientStream, exists := s.clients[msg.Recipient]
+			s.mu.Unlock()
+
+			if exists {
+				err := recipientStream.Send(msg)
+				if err != nil {
+					log.Printf("Error sending private message to %s: %v", msg.Recipient, err)
+				}
+			} else {
+				log.Printf("Recipient %s not found", msg.Recipient)
+			}
+		}
+	}
+}
+
+// Fungsi untuk broadcast pesan ke semua klien
+func (s *chatServer) broadcastToAll(msg *chat.ChatMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for clientName, clientStream := range s.clients {
+		// Jangan kirim pesan ke pengirim
+		if clientName != msg.Sender {
+			err := clientStream.Send(msg)
+			if err != nil {
+				log.Printf("Error broadcasting to %s: %v", clientName, err)
+			}
+		}
+	}
+}
+
+func (s *chatServer) broadcastToGroup(group string, msg *chat.ChatMessage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Kirim pesan ke semua anggota grup
+	for _, member := range s.groups[group] {
+		if member != msg.Sender {
+			clientStream, exists := s.clients[member]
+			if exists {
 				err := clientStream.Send(msg)
 				if err != nil {
-					log.Printf("Error sending message to %s: %v", name, err)
+					log.Printf("Error broadcasting to %s: %v", member, err)
 				}
 			}
 		}
-
-		log.Printf("Broadcasting message from %s: %s", msg.Sender, msg.Text)
-
-		s.mu.Unlock()
 	}
+}
+
+// Helper untuk memeriksa apakah recipient adalah grup
+func isGroup(recipient string) bool {
+	// Aturan sederhana untuk menentukan apakah recipient adalah grup:
+	// Misalnya, grup memiliki tanda khusus seperti '@'
+	return strings.Contains(recipient, "@")
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
 }
 
 func main() {
