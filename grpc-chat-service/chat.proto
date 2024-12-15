@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package chat;
+
+option go_package = "grpc-chat-service/chat";
+
+service ChatService {
+  rpc SendMessage (ChatMessage) returns (SendResponse);
+  rpc JoinChat (stream ChatMessage) returns (stream ChatMessage);
+}
+
+message ChatMessage {
+  string sender = 1;
+  string recipient = 2;
+  string text = 3;
+}
+
+message SendResponse {
+  string status = 1;
+}
