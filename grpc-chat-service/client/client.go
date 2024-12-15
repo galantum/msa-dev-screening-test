@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"bufio"
@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-func main() {
+func RunClient() {
 	// Membuat koneksi ke server
 	conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure())
 	if err != nil {
@@ -45,7 +45,7 @@ func main() {
 	go func() {
 		defer wg.Done()
 		for {
-			fmt.Print("Enter recipient (leave empty for broadcast; add '@' for group name, e.g., '@group1'): ")
+			fmt.Print("Enter recipient (leave empty for broadcast; add '@' for group name, e.g., '@group1'; or fill with specific username for private message): ")
 			target, _ := reader.ReadString('\n')
 			target = strings.TrimSpace(target)
 
