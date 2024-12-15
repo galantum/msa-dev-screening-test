@@ -17,12 +17,14 @@ type chatServer struct {
 	mu      sync.Mutex
 	clients map[string]chat.ChatService_JoinChatServer // Menyimpan stream client
 	groups  map[string][]string
+	history map[string][]*chat.ChatMessage // Riwayat berbasis map
 }
 
 func newChatServer() *chatServer {
 	return &chatServer{
 		clients: make(map[string]chat.ChatService_JoinChatServer),
 		groups:  make(map[string][]string),
+		history: make(map[string][]*chat.ChatMessage), // Inisialisasi map riwayat
 	}
 }
 
@@ -52,10 +54,38 @@ func (s *chatServer) JoinChat(stream chat.ChatService_JoinChatServer) error {
 			s.clients[clientName] = stream
 			s.mu.Unlock()
 			log.Printf("Client %s joined", clientName)
+
+			// Kirim riwayat pesan kepada klien baru
+			s.mu.Lock()
+			for _, historyMsg := range s.history[clientName] {
+				stream.Send(historyMsg)
+			}
+			s.mu.Unlock()
 			continue
 		}
 
 		log.Printf("Message from %s: %s", msg.Sender, msg.Text)
+
+		// Simpan pesan ke riwayat untuk user atau grup
+		s.mu.Lock()
+		recipient := msg.Recipient
+		if recipient == "" {
+			recipient = "broadcast" // Simpan broadcast di key khusus
+		}
+		s.history[recipient] = append(s.history[recipient], msg)
+		s.mu.Unlock()
+
+		// tambah manual di message, ketika mengetik "/history" maka akan menampilkan riwayat pesan
+		if msg.Text == "/history" {
+			s.mu.Lock()
+			if history, exists := s.history[recipient]; exists {
+				for _, histMsg := range history {
+					stream.Send(histMsg)
+				}
+			}
+			s.mu.Unlock()
+			continue
+		}
 
 		// Jika recipient empty, broadcast ke all
 		if msg.Recipient == "" {
@@ -85,6 +115,12 @@ func (s *chatServer) JoinChat(stream chat.ChatService_JoinChatServer) error {
 			}
 		}
 	}
+}
+
+func (s *chatServer) GetChatHistory(userOrGroup string) []*chat.ChatMessage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.history[userOrGroup]
 }
 
 // Fungsi untuk broadcast pesan ke semua klien
