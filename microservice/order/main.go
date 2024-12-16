@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"microservices/middleware"
 	"net/http"
 	"strconv"
 	"strings"
@@ -60,8 +61,8 @@ var orders = []Order{
 var mu sync.Mutex
 
 func main() {
-	http.HandleFunc("/order", handleOrders)     // Endpoint untuk GET semua data atau POST
-	http.HandleFunc("/order/", handleOrderByID) // Endpoint untuk GET, PUT, DELETE berdasarkan ID
+	http.HandleFunc("/order", middleware.AuthMiddleware(handleOrders))     // Endpoint untuk GET semua data atau POST
+	http.HandleFunc("/order/", middleware.AuthMiddleware(handleOrderByID)) // Endpoint untuk GET, PUT, DELETE berdasarkan ID
 	http.ListenAndServe(":8002", nil)
 }
 

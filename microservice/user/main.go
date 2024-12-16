@@ -2,9 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"microservices/middleware"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/golang-jwt/jwt"
 )
 
 // User struct
@@ -13,6 +17,7 @@ type User struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Age      int    `json:"age"`
+	Password string `json:"password,omitempty"`
 }
 
 type APIResponse struct {
@@ -23,46 +28,61 @@ type APIResponse struct {
 
 // Mock data (in-memory store)
 var users = []User{
-	{ID: 1, Username: "manager", Email: "manager@example.com", Age: 40},
-	{ID: 2, Username: "staff", Email: "staff@example.com", Age: 21},
-	{ID: 3, Username: "admin", Email: "admin@example.com", Age: 25},
+	{ID: 1, Username: "manager", Email: "manager@example.com", Age: 40, Password: "manager"},
+	{ID: 2, Username: "staff", Email: "staff@example.com", Age: 21, Password: "staff"},
+	{ID: 3, Username: "admin", Email: "admin@example.com", Age: 25, Password: "admin"},
 }
 
-// Mutex for thread safety
-var mu sync.Mutex
+var (
+	secretKey = "msa_grandis_2024" // Ganti dengan secret key yang lebih aman
+	mu        sync.Mutex           // Mutex for thread safety
+)
 
 func main() {
-	http.HandleFunc("/user", GetAllProfiles)                 // GET all profiles
-	http.HandleFunc("/user/profile/", HandleProfileRequests) // GET/PUT specific profile
+	http.HandleFunc("/user/login", Login)
+	http.HandleFunc("/user/profile/", middleware.AuthMiddleware(HandleProfileRequests)) // GET/PUT specific profile
 	http.ListenAndServe(":8001", nil)
 }
 
-// GetAllProfiles - Get all user profiles
-func GetAllProfiles(w http.ResponseWriter, r *http.Request) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	if r.Method != http.MethodGet {
+func Login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	msg := "No data!"
-
-	if len(users) > 1 {
-		msg = "Get success!"
+	var credentials struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
-	// Buat response sesuai format
-	response := APIResponse{
-		Data:      users,
-		TotalData: len(users), // Total user data
-		Message:   msg,
+	// Parse request body
+	if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	// Validate email & password
+	for _, user := range users {
+		if user.Email == credentials.Email && user.Password == credentials.Password {
+			// Buat token JWT
+			token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+				"userID": user.ID,
+				"exp":    time.Now().Add(time.Hour * 1).Unix(), // Token expired is 1 hours
+			})
+
+			tokenString, err := token.SignedString([]byte(secretKey))
+			if err != nil {
+				http.Error(w, "Could not generate token", http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+			return
+		}
+	}
+
+	http.Error(w, "Invalid email or password", http.StatusUnauthorized)
 }
 
 // HandleProfileRequests - Handle GET and PUT requests for individual profiles
@@ -90,7 +110,8 @@ func GetProfile(w http.ResponseWriter, r *http.Request, userName string) {
 
 	for _, user := range users {
 		if strings.EqualFold(user.Username, userName) {
-			// Bungkus response
+			user.Password = ""
+
 			response := APIResponse{
 				Data:      user,
 				TotalData: 1, // Only 1 data found
@@ -134,7 +155,6 @@ func UpdateProfile(w http.ResponseWriter, r *http.Request, userName string) {
 			users[i].Email = updatedUser.Email
 			users[i].Age = updatedUser.Age
 
-			// Bungkus response
 			response := APIResponse{
 				Data:      users[i],
 				TotalData: 1, // Only 1 data found
